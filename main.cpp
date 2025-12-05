@@ -32,6 +32,8 @@ class MyDriver : public OpenGLViewer
     // new years stuff
     OpenGLTriangleMesh* ground = nullptr;
     std::vector<OpenGLTriangleMesh*> buildings;
+    OpenGLTriangleMesh* pole = nullptr;
+    OpenGLTriangleMesh* ball = nullptr;
 
 public:
     virtual void Initialize()
@@ -78,7 +80,7 @@ public:
         elements.push_back(Vector3i(0, 2, 1));
         elements.push_back(Vector3i(0, 3, 2));
 
-        // texture mappong
+        // texture mapping
         for (int i = 0; i < 8; i++) {
             uvs.push_back(Vector2(0.0f, 0.0f));
         }
@@ -97,7 +99,7 @@ public:
         return building;
     }
 
-    // creatong the ground
+    // creating the ground
     OpenGLTriangleMesh* Create_Ground_Plane(float width, float length, float height)
     {
         std::vector<Vector3> vertices;
@@ -130,12 +132,121 @@ public:
 
     }
 
+    // procedurally generate sphere mesh
+    OpenGLTriangleMesh* Create_Sphere(float radius, int slices, int stacks, Vector3f center)
+    {
+        std::vector<Vector3>  vertices;
+        std::vector<Vector3i> elements;
+        std::vector<Vector2>  uvs;
+
+        // generate vertices
+        for (int i = 0; i <= stacks; ++i) {
+            float v   = (float)i / (float)stacks;
+            float phi = v * M_PI;
+
+            for (int j = 0; j <= slices; ++j) {
+                float u   = (float)j / (float)slices;
+                float theta = u * 2.0f * M_PI;
+
+                float x = radius * sinf(phi) * cosf(theta);
+                float y = radius * cosf(phi);
+                float z = radius * sinf(phi) * sinf(theta);
+
+                vertices.push_back(Vector3(x, y, z));
+                uvs.push_back(Vector2(u, v));
+            }
+        }
+
+        int vertsPerRow = slices + 1;
+        for (int i = 0; i < stacks; ++i) {
+            for (int j = 0; j < slices; ++j) {
+                int i0 = i * vertsPerRow + j;
+                int i1 = i0 + 1;
+                int i2 = i0 + vertsPerRow;
+                int i3 = i2 + 1;
+
+                elements.push_back(Vector3i(i0, i2, i1));
+                elements.push_back(Vector3i(i1, i2, i3));
+            }
+        }
+
+        auto sphere = Add_Tri_Mesh_Object(vertices, elements);
+        sphere->mesh.Uvs() = uvs;
+
+        // put it in world
+        Matrix4f t;
+        t << 1,0,0,center[0],
+            0,1,0,center[1],
+            0,0,1,center[2],
+            0,0,0,1;
+        sphere->Set_Model_Matrix(t);
+
+        return sphere;
+    }
+
+    OpenGLTriangleMesh* Create_Cylinder(
+        float radius,
+        float height,
+        int slices,
+        Vector3f baseCenter)
+    {
+        std::vector<Vector3> vertices;
+        std::vector<Vector3i> elements;
+        std::vector<Vector2> uvs;
+
+        // generate top and bottom vertices
+        for (int i = 0; i <= slices; i++) {
+            float t = float(i) / float(slices);
+            float angle = t * 2.0f * M_PI;
+            float x = radius * cos(angle);
+            float z = radius * sin(angle);
+
+            // bottom vertex
+            vertices.push_back(Vector3(x, 0.0f, z));
+            uvs.push_back(Vector2(t, 0.0f));
+
+            // top vertex
+            vertices.push_back(Vector3(x, height, z));
+            uvs.push_back(Vector2(t, 1.0f));
+        }
+
+        // make triangles
+        for (int i = 0; i < slices; i++) {
+            int i0 = 2 * i;
+            int i1 = i0 + 1;
+            int i2 = i0 + 2;
+            int i3 = i0 + 3;
+
+            // side quad split into triangles
+            elements.push_back(Vector3i(i0, i2, i1));
+            elements.push_back(Vector3i(i1, i2, i3));
+        }
+
+        // create mesh object
+        auto cyl = Add_Tri_Mesh_Object(vertices, elements);
+        cyl->mesh.Uvs() = uvs;
+
+        // put in world
+        Matrix4f T;
+        T << 1,0,0,baseCenter[0],
+            0,1,0,baseCenter[1],
+            0,0,1,baseCenter[2],
+            0,0,0,1;
+        cyl->Set_Model_Matrix(T);
+
+        return cyl;
+    }
+
+
+
     virtual void Initialize_Data()
     {
         //// Load shaders
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/basic.vert", "shaders/basic.frag", "basic");
         OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/building.vert", "shaders/building.frag", "building");
         //OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/street.vert", "shaders/street.frag", "street");
+        OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/basic.vert", "shaders/ball.frag", "ball");
+        OpenGLShaderLibrary::Instance()->Add_Shader_From_File("shaders/basic.vert", "shaders/pole.frag", "pole");
 
         //// Load textures
         OpenGLTextureLibrary::Instance()->Add_Texture_From_File("tex/star.png", "star_color");
@@ -224,6 +335,36 @@ public:
             b6->Set_Shininess(32.0f);
             b6->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("building"));
             buildings.push_back(b6);
+        }
+
+        // pole
+        {
+            float poleRadius = 0.15f;
+            float poleHeight = 4.0f;
+
+            pole = Create_Cylinder(poleRadius, poleHeight, 40, Vector3f(0.0f, -3.0f, -5.0f));
+
+            pole->Set_Ka(Vector3f(0.08f, 0.08f, 0.08f));
+            pole->Set_Kd(Vector3f(0.7f, 0.7f, 0.75f));
+            pole->Set_Ks(Vector3f(1.0f, 1.0f, 1.0f));
+            pole->Set_Shininess(128.0f);
+
+            pole->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("pole"));
+        }
+
+
+        // ball
+        {
+            float ballRadius = 1.2f;
+
+            ball = Create_Sphere(ballRadius, 40, 40, Vector3f(0.0f, 2.1f, -5.0f));
+
+            ball->Set_Ka(Vector3f(0.5f, 0.5f, 0.5f));
+            ball->Set_Kd(Vector3f(0.9f, 0.9f, 0.9f));
+            ball->Set_Ks(Vector3f(1.0f, 1.0f, 1.0f));
+            ball->Set_Shininess(128.0f);
+
+            ball->Add_Shader_Program(OpenGLShaderLibrary::Get_Shader("ball"));
         }
 
         //// This for-loop updates the rendering model for each object on the list
