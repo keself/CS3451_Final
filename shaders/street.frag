@@ -52,11 +52,64 @@ uniform sampler2D tex_normal;   /* texture sampler for normal vector */
 out vec4 frag_color;
 
 float hash(float n) {
-    return fract(sin(n) * 43758.5453);
+    return fract(sin(n) * 41973.67);
 }
 
 float hash2d(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    return fract(sin(dot(p, vec2(127.1, 333.7))) * 41973.67);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    
+    float a = hash2d(i);
+    float b = hash2d(i + vec2(1.0, 0.0));
+    float c = hash2d(i + vec2(0.0, 1.0));
+    float d = hash2d(i + vec2(1.0, 1.0));
+    
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// making asphalt-like terrain on road
+vec3 compute_asphalt_normal(vec2 uv) {
+    vec2 p = uv * 50.0f;
+
+    float eps = 0.1;
+    float h = noise(p);
+    float height_x = noise(p + vec2(eps, 0.0));
+    float height_y = noise(p + vec2(0.0, eps));
+
+    float slope_x = (height_x - h) / eps;
+    float slope_y = (height_y - h) / eps;
+
+    vec3 tangent_normal = normalize(vec3(-slope_x * 0.3, -slope_y * 0.3, 1.0));
+
+    // adding a detail layer
+    vec2 p2 = uv * 200.0f;
+    float h2 = noise(p2);
+    float height_x2 = noise(p2 + vec2(eps * 0.5, 0.0));
+    float height_y2 = noise(p2 + vec2(0.0, eps * 0.5));
+    
+    // taking derivative
+    float dx2 = (height_x2 - h2) / (eps * 0.5);
+    float dy2 = (height_y2 - h2) / (eps * 0.5);
+    
+    tangent_normal += vec3(-dx2 * 0.15, -dy2 * 0.15, 0.0);
+    tangent_normal = normalize(tangent_normal);
+    
+    return tangent_normal;
+}
+
+// converting normal from tangent to world space
+vec3 tangent_to_world(vec3 tangent_normal, vec3 N, vec3 T) {
+    vec3 B = normalize(cross(N, T));
+    T = normalize(cross(B, N));
+    
+    // making tangent bitangent normal matirx
+    mat3 tang_bitang_norm = mat3(T, B, N);
+    return normalize(tang_bitang_norm * tangent_normal);
 }
 
 // markings on the street
@@ -114,6 +167,9 @@ void main()
     vec3 N = normalize(vtx_normal);     //// normal vector
     vec3 T = normalize(vtx_tangent);    //// tangent vector
 
+    vec3 tangent_normal = compute_asphalt_normal(vtx_uv);
+    vec3 world_normal = tangent_to_world(tangent_normal, N, T);
+
     // getting asphalt textyre
     vec3 asphalt = asphalt_texture(vtx_uv);
     
@@ -126,7 +182,7 @@ void main()
     // lighting
     vec3 total_light = vec3(0.0);
     for(int i = 0; i < lt_att[0]; i++) {
-        total_light += shading_phong(lt[i], e, p, N);
+        total_light += shading_phong(lt[i], e, p, world_normal);
     }
     vec3 final_color = base_color * (0.5 + total_light * 0.5);
     
