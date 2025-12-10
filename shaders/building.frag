@@ -49,11 +49,11 @@ uniform float shininess;
 out vec4 frag_color;
 
 float hash(float n) {
-    return fract(sin(n) * 43758.5453);
+    return fract(sin(n) * 40000.67);
 }
 
 float hash2d(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+	return fract(sin(dot(p, vec2(127.1, 333.37))) * 40000.67);
 }
 
 // generating procedural windows
